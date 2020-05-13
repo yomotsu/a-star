@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>=^.^=</title>
+<style>
+#view table {
+	border-collapse: collapse;
+}
+#view table td{
+	border: 1px solid #000;
+	width: 20px;
+	height: 20px;
+}
+#view table td.-path {
+	background: green;
+}
+#view table td.-startNode {
+	background: red;
+}
+#view table td.-goalNode {
+	background: blue;
+}
+#view table td.-wall {
+	background: #666;
+}
+</style>
+</head>
+<body>
+
+<div id="view">
+</div>
+
+<script>
+// based on https://qiita.com/2dgames_jp/items/f29e915357c1decbc4b7
+
+const GRID_NODE_STATUS = {
+	NONE: 0,
+	OPEN: 1,
+	CLOSED: 2,
+}
+
+class GridNode {
+
+	constructor( x = 0, y = 0, isWall ) {
+
+		this.x = x;
+		this.y = y;
+		this.weight = 1;
+		this.cost = null; // step cost
+		this.heuristicCost = null;
+		this.previousNode = null; // opener node
+		this.isWall = isWall;
+		this.status = GRID_NODE_STATUS.NONE;
+
+	}
+
+	get score() {
+		return this.cost + this.heuristicCost;
+	}
+
+	reset() {
+
+		this.cost = null;
+		this.heuristicCost = null;
+		this.previousNode = null;
+		this.status = GRID_NODE_STATUS.NONE;
+
+
+	}
+
+	calcCost( previousNode, goalNode ) {
+
+		if ( this.status !== GRID_NODE_STATUS.NONE ) return;
+
+		this.status = GRID_NODE_STATUS.OPEN;
+		this.cost = previousNode ? previousNode.cost + this.weight : 0; // ここまでの移動に掛かったコスト
+		this.heuristicCost = this.distanceTo( goalNode ); // ゴールまでの残り推定コスト（壁を無視した最短）
+		this.previousNode = previousNode; // 逆を辿れるように保存
+
+	}
+
+	close() {
+
+		this.status = GRID_NODE_STATUS.CLOSED;
+
+	}
+
+	distanceTo( node ) {
+
+		const dx = Math.abs( node.x - this.x );
+		const dy = Math.abs( node.y - this.y );
+		return Math.max( dx, dy ); // ゴールまでの残り推定コスト（壁を無視した最短）
+
+	}
+}
+
+class Grid {
+
+	constructor() {
+
+		this.startNode = null;
+		this.goalNode = null;
+		this.path = [];
+
+		this.map = [
+			[ 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1 ],
+			[ 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1 ],
+			[ 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1 ],
+			[ 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1 ],
+			[ 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1 ],
+			[ 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1 ],
+			[ 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1 ],
+			[ 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1 ],
+			[ 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1 ],
+			[ 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1 ],
+			[ 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1 ],
+			[ 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1 ],
+		].map( ( row, y ) => row.map( ( walkable, x ) => new GridNode( x, y, ! walkable ) ) );
+
+		this.openNodes = [];
+
+	}
+
+	setStart( x, y ) {
+
+		this.startNode = this.map[ y ][ x ];
+
+	}
+
+	setGoal( x, y ) {
+
+		this.goalNode = this.map[ y ][ x ];
+
+	}
+
+	findPath() {
+
+		if ( ! this.startNode || ! this.goalNode ) return;
+
+		const headNode = this.findHeadNode();
+		headNode.calcCost( null, this.goalNode );
+		const neighbors = this.openNeighborNodes( headNode );
+
+		// 新しく open になった node を this.openNodes に格納。
+		neighbors.forEach( ( neighborNode ) => neighborNode.calcCost( headNode, this.goalNode ) );
+		this.openNodes.push( ...neighbors.filter( ( node ) => ! this.openNodes.includes( node ) ) );
+
+		// 周囲を open してそれらの計算が完了したら、役目を終えたので自身は close。
+		headNode.close();
+
+		this.step();
+
+	}
+
+	reset() {
+
+		this.openNodes.length = 0;
+		this.map.forEach( ( row ) => row.forEach( ( col ) => col.reset() ) );
+
+	}
+
+	step() {
+
+		// 最小スコアのノードを探す
+		const headNode = this.findHeadNode();
+
+		if ( headNode === this.goalNode ) {
+
+			this.stepEnd();
+			return;
+
+		}
+
+		const neighbors = this.openNeighborNodes( headNode );
+		neighbors.forEach( ( neighborNode ) => neighborNode.calcCost( headNode, this.goalNode ) );
+		this.openNodes.push( ...neighbors.filter( ( node ) => ! this.openNodes.includes( node ) ) );
+		// head の役目を終えたので close して openNodes から head を削除
+		headNode.close();
+		this.openNodes.splice( this.openNodes.findIndex( ( node ) => headNode === node ), 1 );
+
+		this.step();
+
+	}
+
+	stepEnd() {
+
+		let node = this.goalNode;
+		this.path.length = 0;
+		this.path.push( node );
+
+		while( node.previousNode ) {
+
+			this.path.push( node.previousNode )
+			node = node.previousNode;
+
+		}
+
+		this.path.reverse();
+
+	}
+
+	openNeighborNodes( node ) {
+
+		const neighborList = [];
+
+		for ( let y = node.y - 1, maxY = node.y + 1; y <= maxY; y ++ ) {
+
+			if ( ! this.map[ y ] ) continue;
+
+			for ( let x = node.x - 1, maxX = node.x + 1; x <= maxX; x ++ ) {
+
+				if ( ! this.map[ y ][ x ] ) continue;
+
+				const node = this.map[ y ][ x ];
+
+				if ( node.isWall ) continue;
+				if ( node.status === GRID_NODE_STATUS.CLOSED ) continue;
+
+				neighborList.push( node );
+
+			}
+
+		}
+
+		return neighborList;
+
+	}
+
+	findHeadNode() {
+
+		if ( this.openNodes.length === 0 ) return this.startNode;
+		return this.openNodes.reduce( ( headNode, node ) => headNode && headNode.score < node.score ? headNode : node, null );
+
+	}
+
+	toHTML() {
+		return `
+			<table>
+			${ this.map.map( ( row ) => `<tr>${ row.map( ( col ) => {
+
+				const classList = [];
+				if ( this.startNode === col ) classList.push( '-startNode' );
+				if ( this.goalNode === col ) classList.push( '-goalNode' );
+				if ( col.isWall ) classList.push( '-wall' );
+				if ( this.path.includes( col ) ) classList.push( '-path' );
+
+				return `
+					<td
+						class="${ classList.join( ' ' ) }"
+						data-x=${ col.x }
+						data-y=${ col.y }
+					>
+						${ col.cost }
+					</td>
+				`;
+			} ).join( '' ) }</tr>` ).join( '' ) }
+			</table>
+			`
+	}
+}
+
+const grid = new Grid();
+grid.setStart( 0, 0 )
+grid.setGoal( 4, 9 )
+grid.findPath();
+view.innerHTML = grid.toHTML();
+
+view.addEventListener( 'click', ( event ) => {
+
+	const x = event.target.getAttribute( 'data-x' ) | 0;
+	const y = event.target.getAttribute( 'data-y' ) | 0;
+
+	grid.reset();
+	grid.setStart( grid.goalNode.x, grid.goalNode.y );
+	grid.setGoal( x, y );
+	grid.findPath();
+	view.innerHTML = grid.toHTML();
+
+} );
+
+</script>
+
+
+</body>
+</html>
